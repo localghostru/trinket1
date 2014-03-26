@@ -54,7 +54,7 @@ function trinket1game() {
         explosions = game.add.group();
         explosions.createMultiple(10, 'bombexplosion');
         explosions.forEach(function(item) { 
-            item.body.setSize(80, 80, -24, -24);
+            item.body.setSize(96, 96, -32, -32);
             item.animations.add('run');
             
             item.events.onAnimationComplete = new Phaser.Signal();
@@ -204,9 +204,8 @@ function trinket1game() {
     function stopGame() {
         bombs.callAll('kill');
         missile.kill();
+        missile.reset(-20, -20);
         explosions.callAll('kill');
-        explosions.forEach(function(item) { if(item.events.onAnimationComplete)
-                                                item.events.onAnimationComplete.removeAll(); }, this);
         gameRunning = false;
     }
     
@@ -255,6 +254,9 @@ function trinket1game() {
         
         // Animate firing missile
         missile.reset(sub.x + firePoint[0], sub.y + firePoint[1]);
+        //missile.reset(missile.body.x, missile.body.y);
+        console.log(missile.x, missile.y, missile.body.x, missile.body.y);
+        
         missile.body.velocity.y = sub.body.velocity.y;
         missile.body.velocity.x = 0;
         game.add.tween(missile.body.velocity).to({ x: 150 }, 500, Phaser.Easing.Quadratic.In, true, 0);
@@ -283,6 +285,7 @@ function trinket1game() {
             console.log(_bomb);
         }
         _missile.kill();
+        _missile.reset(-20, -20);
         createExplosion(_bomb);
     }
     
