@@ -10,6 +10,7 @@ function trinket1game() {
     const FULL_HEALTH = 1000;
     const FIRING_DELAY = 3000;
     const INITIAL_DISTANCE = 5000;
+    const HULL_HEIGHT = 80;
 
     function preload() {
         game.load.spritesheet('sub', 'assets/sprites/sub.png', 70, 50);
@@ -18,6 +19,10 @@ function trinket1game() {
         game.load.spritesheet('bombexplosion', 'assets/sprites/explosion7.png', 32, 32);
         game.load.image('bubble', 'assets/sprites/bubble.png');
         game.load.image('bgtile', 'assets/sprites/backtile.png');
+        
+        game.load.audio('fire', 'assets/sounds/fire_missile.ogg');
+        game.load.audio('boom', 'assets/sounds/explosion.ogg');
+        game.load.audio('ticks', 'assets/sounds/ammo_ticks.ogg');
     }
 
     function create() {
@@ -26,22 +31,45 @@ function trinket1game() {
         
         sub = game.add.sprite(25, 100, 'sub');
         sub.animations.add('move', [0, 1, 2, 3, 2, 1]);
-        sub.animations.play('move', 15, true);
+        sub.animations.play('move', 8, true);
         sub.body.collideWorldBounds = true;
         sub.body.setSize(70, 60, 5, -5);
         
-        missiles = game.add.group();
-        missiles.createMultiple(MAX_AMMO, 'missile');
-        missiles.setAll('outOfBoundsKill', true);
-        missiles.forEach(function(item) { item.body.setSize(20, 18, 0, -6); });
+        missile = game.add.sprite(-20, -20, 'missile');
+        missile.visible = false;
+        missile.outOfBoundsKill = true;
+        missile.body.setSize(20, 18, 0, -6);
+        missile.body.drag.setTo(0, 100);
+        
+        missileFireSound = game.add.audio('fire', 0.8);
         
         bombs = game.add.group();
         bombs.createMultiple(20, 'bomb');
-        bombs.setAll('outOfBoundsKill', true);        
+        bombs.setAll('outOfBoundsKill', true);
+        var bomb = bombs.getFirstDead();
+        bomb.reset(330, 100 + Math.random()*100);
+        
+        bombExplodeSound = game.add.audio('boom', 0.8);
         
         explosions = game.add.group();
         explosions.createMultiple(10, 'bombexplosion');
-        explosions.forEach(function(item) { item.body.setSize(80, 80, -24, -24); });
+        explosions.forEach(function(item) { 
+            item.body.setSize(80, 80, -24, -24);
+            item.animations.add('run');
+            
+            item.events.onAnimationComplete = new Phaser.Signal();
+            item.events.onAnimationComplete.add(function(sprite, anim) {
+                game.physics.overlap(sprite, bombs, explosionHitsBomb, null, this);
+                sprite.kill();
+                
+                var em = getFreeEmitter();
+                em.x = sprite.x + 16;
+                em.y = sprite.y + 16;
+                em.setAll('alpha', 1);
+                em.forEach(disappear, 1000);
+                em.start(true, 2000, 0, 100);
+            });
+        });
         
         bombSpawner = game.add.sprite(400, 0, 'bomb');  //Could be anything
         bombSpawner.visible = false;
@@ -51,9 +79,11 @@ function trinket1game() {
             ammunition.create(5, 24 + i * 8, 'missile');
         ammunition.setAll('alpha', 0.5);
         
-        hull = game.add.graphics(5, 170);
+        ammoTicksSound = game.add.audio('ticks', 0.6);
+        
+        hull = game.add.graphics(5, 190);
         hull.beginFill("0x00ff00", "0.75");
-        hull.drawRect(0, 0, 20, 100);
+        hull.drawRect(0, 0, 20, HULL_HEIGHT);
         hull.endFill();
         
         bestResult = '';
@@ -63,11 +93,13 @@ function trinket1game() {
         labelDist = game.add.text(360, 5, '5000', { font: '14px Courier', fill: '#0' });
         labelBest = game.add.text(256, 20, 'Best result:', { font: '14px Courier', fill: '#0' });
         labelBest.visible = false;
-        labelStart = game.add.text(80, 75, "Escort your sub to safety\n\nAvoid the bombs\nDon't move too close\n\nMove with up/down arrows\nFire with SPACE\nYour ammo is limited\n\nPress SPACE to start",
+        labelTitle = game.add.text(100, 60, "ESCAPE MISSION",
+                                   {font: '24px Courier', fill:'#a0a0a0', stroke:'#00f', strokeThickness:'1'});
+        labelStart = game.add.text(80, 100, "Avoid the bombs\nDon't move too close\n\nMove with up/down arrows\nFire missiles with SPACE\nAmmo is very limited\n\nPress SPACE to start",
                                    {font: '16px Courier', fill:'#fff', align: 'center'});
-        labelLost = game.add.text(80, 80, "Game Over\n\nYour sub was destroyed\n\nPress SPACE to restart",
+        labelLost = game.add.text(80, 100, "Game Over\n\nYour sub was destroyed\n\nPress SPACE to restart",
                                    {font: '16px Courier', fill:'#fff', align: 'center'});
-        labelWon = game.add.text(80, 80, "Congratulations!\n\nYou are safe now!\n\nPress SPACE to restart",
+        labelWon = game.add.text(80, 100, "Congratulations!\n\nYou are safe now!\n\nPress SPACE to restart",
                                    {font: '16px Courier', fill:'#fff', align: 'center'});
         labelLost.visible = labelWon.visible = false;
         
@@ -100,7 +132,7 @@ function trinket1game() {
         }
         
         if(bombSpawner.x <= 400 &&
-          distance > 300 * 60 / 20 + 30) {       // Winning condition: distance should be 0 when passing last bomb; 60 is estimated framerate
+          distance > 430) {       // Winning condition: distance should be 0 when passing last bomb, guessed.
             bomb = bombs.getFirstDead();
             bombX = 400 + (MIN_BOMB_DISTANCE + Math.random() * (MAX_BOMB_DISTANCE - MIN_BOMB_DISTANCE));
             do {
@@ -110,13 +142,13 @@ function trinket1game() {
             lastBombY = bombY;
             
             bomb.reset(bombX, bombY);
-            currVel -= 0.2;
+            currVel -= 0.25;
             bombs.setAll('body.velocity.x', currVel);
             bombSpawner.x = bombX;
             bombSpawner.body.velocity.x = currVel;
         }
         game.physics.overlap(sub, bombs, subHitsBomb, null, this);
-        game.physics.overlap(missiles, bombs, missileHitsBomb, null, this);
+        game.physics.overlap(missile, bombs, missileHitsBomb, null, this);
         game.physics.overlap(sub, explosions, damageHull, null, this);
     }
     
@@ -151,7 +183,7 @@ function trinket1game() {
         
         hull.clear();
         hull.beginFill("0x00ff00", "0.75");
-        hull.drawRect(0, 0, 20, 100);
+        hull.drawRect(0, 0, 20, HULL_HEIGHT);
         hull.endFill();
         
         bombSpawner.x = bomb.x;
@@ -159,7 +191,7 @@ function trinket1game() {
         
         lastFireTime = game.time.now - FIRING_DELAY;
         labelDist.content = distance;
-        labelLost.visible = labelWon.visible = labelStart.visible = false;
+        labelTitle.visible = labelLost.visible = labelWon.visible = labelStart.visible = false;
         
         if(bestResult != '') {
             labelBest.content = 'Best result: ' + bestResult;
@@ -171,15 +203,17 @@ function trinket1game() {
     
     function stopGame() {
         bombs.callAll('kill');
-        missiles.callAll('kill');
+        missile.kill();
         explosions.callAll('kill');
+        explosions.forEach(function(item) { if(item.events.onAnimationComplete)
+                                                item.events.onAnimationComplete.removeAll(); }, this);
         gameRunning = false;
     }
     
     function gameLost() {
         stopGame();
         game.add.tween(sub).to({alpha: 0}, 1500, Phaser.Easing.Quadratic.In, true, 0);
-        labelLost.visible = true;
+        labelTitle.visible = labelLost.visible = true;
         bestResult = distance.toFixed(0);
     }
     
@@ -187,7 +221,7 @@ function trinket1game() {
         stopGame();
         game.add.tween(sub.body.velocity).to({x: 1000}, 4000, Phaser.Easing.Quadratic.In, true, 0);
         game.add.tween(sub.scale).to({x: 0.01, y:0.01}, 4000, Phaser.Easing.Quadratic.In, true, 0);
-        labelWon.visible = true;
+        labelTitle.visible = labelWon.visible = true;
         bestResult = 'win';
     }
     
@@ -220,9 +254,11 @@ function trinket1game() {
         }
         
         // Animate firing missile
-        missile = missiles.getFirstDead();
         missile.reset(sub.x + firePoint[0], sub.y + firePoint[1]);
+        missile.body.velocity.y = sub.body.velocity.y;
+        missile.body.velocity.x = 0;
         game.add.tween(missile.body.velocity).to({ x: 150 }, 500, Phaser.Easing.Quadratic.In, true, 0);
+        missileFireSound.play();
         
         // Animate ammo
         ammo = ammunition.getFirstAlive();
@@ -231,6 +267,7 @@ function trinket1game() {
                                     game.add.tween(item).to({ y: '-8'}, FIRING_DELAY,
                                                             Phaser.Easing.Linear.None, true, 0);
                                 }, this);
+        ammoTicksSound.play();
         
         lastFireTime = game.time.now;
     }
@@ -240,6 +277,11 @@ function trinket1game() {
     }
     
     function missileHitsBomb(_missile, _bomb) {
+        if(_missile.body.velocity.x == 0) {
+            console.log("Happened again");
+            console.log(_missile);
+            console.log(_bomb);
+        }
         _missile.kill();
         createExplosion(_bomb);
     }
@@ -251,29 +293,9 @@ function trinket1game() {
     function createExplosion(_bomb) {
         expl = explosions.getFirstDead();
         expl.reset(_bomb.x - 1, _bomb.y - 1);
-        if(!expl.animations.getAnimation('run1')) {
-            expl.animations.add('run1', [0,1,2,3,4,5,6,7,8,10]);
-            expl.animations.add('run2', [11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]);
-            expl.events.onAnimationComplete = new Phaser.Signal();
-            expl.events.onAnimationComplete.add(function(sprite, anim) {
-                if(anim.name == 'run2') {
-                    game.physics.overlap(sprite, bombs, explosionHitsBomb, null, this);
-                    sprite.kill();
-                    return;
-                }
-                
-                var em = getFreeEmitter();
-                em.x = sprite.x + 16;
-                em.y = sprite.y + 16;
-                em.setAll('alpha', 1);
-                em.forEach(disappear, 1000);
-                em.start(true, 2000, 0, 100);
-                
-                sprite.animations.play('run2', 100, false, true); 
-            });
-        }
+        expl.animations.play('run', 60, false, false);
         
-        expl.animations.play('run1', 60, false, false);
+        bombExplodeSound.play();
         _bomb.kill();
     }
     
@@ -293,10 +315,13 @@ function trinket1game() {
         
         hull.clear();
         hull.beginFill(color, "0.75");
-        hull.drawRect(0, 100 - 100 * hullHealth / FULL_HEALTH, 20, 100 * hullHealth / FULL_HEALTH);
+        hull.drawRect(0, HULL_HEIGHT * (1 -  hullHealth / FULL_HEALTH), 
+                      20, HULL_HEIGHT * hullHealth / FULL_HEALTH);
         hull.endFill();
         
-        if(hullHealth == 0) gameLost();
+        if(hullHealth == 0) {
+            _expl.events.onAnimationComplete.addOnce(gameLost);
+        }
     }
     
     function prepareEmitters() {
