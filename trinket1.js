@@ -279,11 +279,6 @@ function trinket1game() {
     }
     
     function missileHitsBomb(_missile, _bomb) {
-        if(_missile.body.velocity.x == 0) {
-            console.log("Happened again");
-            console.log(_missile);
-            console.log(_bomb);
-        }
         _missile.kill();
         _missile.reset(-20, -20);
         createExplosion(_bomb);
